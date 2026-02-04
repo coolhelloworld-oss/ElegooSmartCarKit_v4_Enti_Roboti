@@ -1,6 +1,9 @@
 
 
-SmartRobotCarV4.0_V1_20220303
+EntiRobotiV4.0_V1_20230201
+
+Python-GUI-Fernbedienung über WLAN (benötigt: opencv-python, pillow):
+  enti_roboti_remote_control.py --host 192.168.4.1 --port 100 --camera-url http://192.168.4.1:81/stream --speed 150
 
 1#Compatible with TB6612 motor drive version
 2#GY-521

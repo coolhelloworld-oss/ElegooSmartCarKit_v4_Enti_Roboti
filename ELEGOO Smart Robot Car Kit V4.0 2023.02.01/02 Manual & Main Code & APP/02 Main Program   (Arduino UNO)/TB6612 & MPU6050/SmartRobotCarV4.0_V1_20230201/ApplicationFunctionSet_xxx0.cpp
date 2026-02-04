@@ -3,7 +3,7 @@
  * @Date: 2019-10-22 11:59:09
  * @LastEditTime: 2021-01-05 09:30:14
  * @LastEditors: Changhua
- * @Description: Smart Robot Car V4.0
+ * @Description: Enti Roboti V4.0
  * @FilePath: 
  */
 #include <avr/wdt.h>
@@ -1811,7 +1811,7 @@ void ApplicationFunctionSet::ApplicationFunctionSet_SerialPortDataAnalysis(void)
       char *temp = doc["H"];
       CommandSerialNumber = temp; //Get the serial number of the new command
 
-      /*Please view the following code blocks in conjunction with the Communication protocol for Smart Robot Car.pdf*/
+      /*Please view the following code blocks in conjunction with the Communication protocol for Enti Roboti.pdf*/
       switch (control_mode_N)
       {
       case 1: /*<Command：N 1> motor control mode */
