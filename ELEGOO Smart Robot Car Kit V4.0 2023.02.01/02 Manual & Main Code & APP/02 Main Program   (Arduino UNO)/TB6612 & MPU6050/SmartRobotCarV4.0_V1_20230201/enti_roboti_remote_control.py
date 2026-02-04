@@ -177,7 +177,7 @@ class EntiRobotiRemote(tk.Tk):
         ttk.Label(speed_frame, text="Speed", style="Sub.TLabel").pack(
             anchor="w", padx=8, pady=(8, 0)
         )
-        self.speed_slider = ttk.Scale(
+        ttk.Scale(
             speed_frame,
             from_=0,
             to=255,
@@ -185,6 +185,7 @@ class EntiRobotiRemote(tk.Tk):
             variable=self.speed,
         )
         self.speed_slider.pack(fill="x", padx=8, pady=(0, 8))
+        ).pack(fill="x", padx=8, pady=(0, 8))
 
         button_frame = ttk.Frame(control_card, style="Card.TFrame")
         button_frame.pack(fill="x", padx=16, pady=(0, 16))
