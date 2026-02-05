@@ -50,6 +50,7 @@ class WifiController:
         if self.socket:
             return
         self.socket = socket.create_connection((self.host, self.port), timeout=3)
+        self.socket.settimeout(2)
         time.sleep(0.2)
 
     def disconnect(self):
@@ -59,17 +60,26 @@ class WifiController:
 
     def send(self, direction, speed):
         if not self.socket:
-            return
+            return False
         command = build_command(self.seq, direction, speed)
-        self.socket.sendall(command.encode("utf-8"))
-        self.seq += 1
+        return self._send_payload(command)
 
     def send_command(self, command, **data):
         if not self.socket:
-            return
+            return False
         payload = build_simple_command(self.seq, command, **data)
-        self.socket.sendall(payload.encode("utf-8"))
-        self.seq += 1
+        return self._send_payload(payload)
+
+    def _send_payload(self, payload):
+        if not self.socket:
+            return False
+        try:
+            self.socket.sendall(payload.encode("utf-8"))
+            self.seq += 1
+            return True
+        except OSError:
+            self.disconnect()
+            return False
 
 
 class EntiRobotiRemote(tk.Tk):
@@ -79,6 +89,8 @@ class EntiRobotiRemote(tk.Tk):
         self.speed = tk.IntVar(value=speed)
         self.servo_angle = tk.IntVar(value=90)
         self.status = tk.StringVar(value="Nicht verbunden")
+        self.connection_error = tk.StringVar(value="")
+        self.is_connected = False
         self.camera_url = camera_url
         self.video_capture = None
         self.video_label = None
@@ -145,15 +157,20 @@ class EntiRobotiRemote(tk.Tk):
         ttk.Label(status_frame, textvariable=self.status, style="Sub.TLabel").pack(
             side="left"
         )
+        ttk.Label(
+            status_frame, textvariable=self.connection_error, style="Sub.TLabel"
+        ).pack(side="left", padx=6)
 
         connect_frame = ttk.Frame(control_card, style="Card.TFrame")
         connect_frame.pack(fill="x", padx=16, pady=(0, 12))
-        ttk.Button(
+        self.connect_button = ttk.Button(
             connect_frame, text="Verbinden", style="Accent.TButton", command=self._connect
-        ).pack(side="left", padx=8, pady=8)
-        ttk.Button(
+        )
+        self.connect_button.pack(side="left", padx=8, pady=8)
+        self.disconnect_button = ttk.Button(
             connect_frame, text="Trennen", command=self._disconnect
-        ).pack(side="left", padx=8, pady=8)
+        )
+        self.disconnect_button.pack(side="left", padx=8, pady=8)
 
         speed_frame = ttk.Frame(control_card, style="Card.TFrame")
         speed_frame.pack(fill="x", padx=16, pady=(0, 16))
@@ -166,6 +183,8 @@ class EntiRobotiRemote(tk.Tk):
             to=255,
             orient="horizontal",
             variable=self.speed,
+        )
+        self.speed_slider.pack(fill="x", padx=8, pady=(0, 8))
         ).pack(fill="x", padx=8, pady=(0, 8))
 
         button_frame = ttk.Frame(control_card, style="Card.TFrame")
@@ -174,33 +193,73 @@ class EntiRobotiRemote(tk.Tk):
         grid = ttk.Frame(button_frame, style="Card.TFrame")
         grid.pack(padx=8, pady=8)
 
-        ttk.Button(
-            grid, text="↖", style="Control.TButton", command=lambda: self._send("left_forward")
-        ).grid(row=0, column=0, padx=6, pady=6)
-        ttk.Button(
-            grid, text="↑", style="Control.TButton", command=lambda: self._send("forward")
-        ).grid(row=0, column=1, padx=6, pady=6)
-        ttk.Button(
-            grid, text="↗", style="Control.TButton", command=lambda: self._send("right_forward")
-        ).grid(row=0, column=2, padx=6, pady=6)
-        ttk.Button(
-            grid, text="←", style="Control.TButton", command=lambda: self._send("left")
-        ).grid(row=1, column=0, padx=6, pady=6)
-        ttk.Button(
-            grid, text="■", style="Control.TButton", command=lambda: self._send("stop")
-        ).grid(row=1, column=1, padx=6, pady=6)
-        ttk.Button(
-            grid, text="→", style="Control.TButton", command=lambda: self._send("right")
-        ).grid(row=1, column=2, padx=6, pady=6)
-        ttk.Button(
-            grid, text="↙", style="Control.TButton", command=lambda: self._send("left_backward")
-        ).grid(row=2, column=0, padx=6, pady=6)
-        ttk.Button(
-            grid, text="↓", style="Control.TButton", command=lambda: self._send("backward")
-        ).grid(row=2, column=1, padx=6, pady=6)
-        ttk.Button(
-            grid, text="↘", style="Control.TButton", command=lambda: self._send("right_backward")
-        ).grid(row=2, column=2, padx=6, pady=6)
+        self.motion_buttons = []
+        self.motion_buttons.append(
+            ttk.Button(
+                grid,
+                text="↖",
+                style="Control.TButton",
+                command=lambda: self._send("left_forward"),
+            )
+        )
+        self.motion_buttons[-1].grid(row=0, column=0, padx=6, pady=6)
+        self.motion_buttons.append(
+            ttk.Button(
+                grid, text="↑", style="Control.TButton", command=lambda: self._send("forward")
+            )
+        )
+        self.motion_buttons[-1].grid(row=0, column=1, padx=6, pady=6)
+        self.motion_buttons.append(
+            ttk.Button(
+                grid,
+                text="↗",
+                style="Control.TButton",
+                command=lambda: self._send("right_forward"),
+            )
+        )
+        self.motion_buttons[-1].grid(row=0, column=2, padx=6, pady=6)
+        self.motion_buttons.append(
+            ttk.Button(
+                grid, text="←", style="Control.TButton", command=lambda: self._send("left")
+            )
+        )
+        self.motion_buttons[-1].grid(row=1, column=0, padx=6, pady=6)
+        self.motion_buttons.append(
+            ttk.Button(
+                grid, text="■", style="Control.TButton", command=lambda: self._send("stop")
+            )
+        )
+        self.motion_buttons[-1].grid(row=1, column=1, padx=6, pady=6)
+        self.motion_buttons.append(
+            ttk.Button(
+                grid, text="→", style="Control.TButton", command=lambda: self._send("right")
+            )
+        )
+        self.motion_buttons[-1].grid(row=1, column=2, padx=6, pady=6)
+        self.motion_buttons.append(
+            ttk.Button(
+                grid,
+                text="↙",
+                style="Control.TButton",
+                command=lambda: self._send("left_backward"),
+            )
+        )
+        self.motion_buttons[-1].grid(row=2, column=0, padx=6, pady=6)
+        self.motion_buttons.append(
+            ttk.Button(
+                grid, text="↓", style="Control.TButton", command=lambda: self._send("backward")
+            )
+        )
+        self.motion_buttons[-1].grid(row=2, column=1, padx=6, pady=6)
+        self.motion_buttons.append(
+            ttk.Button(
+                grid,
+                text="↘",
+                style="Control.TButton",
+                command=lambda: self._send("right_backward"),
+            )
+        )
+        self.motion_buttons[-1].grid(row=2, column=2, padx=6, pady=6)
 
         mode_frame = ttk.Frame(control_card, style="Card.TFrame")
         mode_frame.pack(fill="x", padx=16, pady=(0, 16))
@@ -209,45 +268,61 @@ class EntiRobotiRemote(tk.Tk):
         )
         mode_buttons = ttk.Frame(mode_frame, style="Card.TFrame")
         mode_buttons.pack(padx=8, pady=(0, 8))
-        ttk.Button(
-            mode_buttons,
-            text="Linie",
-            command=lambda: self._send_mode(1),
-        ).grid(row=0, column=0, padx=4, pady=4)
-        ttk.Button(
-            mode_buttons,
-            text="Hindernis",
-            command=lambda: self._send_mode(2),
-        ).grid(row=0, column=1, padx=4, pady=4)
-        ttk.Button(
-            mode_buttons,
-            text="Folgen",
-            command=lambda: self._send_mode(3),
-        ).grid(row=0, column=2, padx=4, pady=4)
-        ttk.Button(
-            mode_buttons,
-            text="Standby",
-            command=lambda: self._send_stop_mode(),
-        ).grid(row=1, column=0, padx=4, pady=4)
-        ttk.Button(
-            mode_buttons,
-            text="Programm",
-            command=lambda: self._send_clear_program(),
-        ).grid(row=1, column=1, padx=4, pady=4)
-
+        self.mode_buttons = []
+        self.mode_buttons.append(
+            ttk.Button(
+                mode_buttons,
+                text="Linie",
+                command=lambda: self._send_mode(1),
+            )
+        )
+        self.mode_buttons[-1].grid(row=0, column=0, padx=4, pady=4)
+        self.mode_buttons.append(
+            ttk.Button(
+                mode_buttons,
+                text="Hindernis",
+                command=lambda: self._send_mode(2),
+            )
+        )
+        self.mode_buttons[-1].grid(row=0, column=1, padx=4, pady=4)
+        self.mode_buttons.append(
+            ttk.Button(
+                mode_buttons,
+                text="Folgen",
+                command=lambda: self._send_mode(3),
+            )
+        )
+        self.mode_buttons[-1].grid(row=0, column=2, padx=4, pady=4)
+        self.mode_buttons.append(
+            ttk.Button(
+                mode_buttons,
+                text="Standby",
+                command=lambda: self._send_stop_mode(),
+            )
+        )
+        self.mode_buttons[-1].grid(row=1, column=0, padx=4, pady=4)
+        self.mode_buttons.append(
+            ttk.Button(
+                mode_buttons,
+                text="Programm",
+                command=lambda: self._send_clear_program(),
+            )
+        )
+        self.mode_buttons[-1].grid(row=1, column=1, padx=4, pady=4)
         servo_frame = ttk.Frame(control_card, style="Card.TFrame")
         servo_frame.pack(fill="x", padx=16, pady=(0, 16))
         ttk.Label(servo_frame, text="Servo", style="Sub.TLabel").pack(
             anchor="w", padx=8, pady=(8, 0)
         )
-        ttk.Scale(
+        self.servo_slider = ttk.Scale(
             servo_frame,
             from_=0,
             to=180,
             orient="horizontal",
             variable=self.servo_angle,
             command=lambda _val: self._send_servo(),
-        ).pack(fill="x", padx=8, pady=(0, 8))
+        )
+        self.servo_slider.pack(fill="x", padx=8, pady=(0, 8))
 
         light_frame = ttk.Frame(control_card, style="Card.TFrame")
         light_frame.pack(fill="x", padx=16, pady=(0, 16))
@@ -256,31 +331,47 @@ class EntiRobotiRemote(tk.Tk):
         )
         light_buttons = ttk.Frame(light_frame, style="Card.TFrame")
         light_buttons.pack(padx=8, pady=(0, 8))
-        ttk.Button(
-            light_buttons,
-            text="Rot",
-            command=lambda: self._send_light(255, 0, 0),
-        ).grid(row=0, column=0, padx=4, pady=4)
-        ttk.Button(
-            light_buttons,
-            text="Grün",
-            command=lambda: self._send_light(0, 255, 0),
-        ).grid(row=0, column=1, padx=4, pady=4)
-        ttk.Button(
-            light_buttons,
-            text="Blau",
-            command=lambda: self._send_light(0, 0, 255),
-        ).grid(row=0, column=2, padx=4, pady=4)
-        ttk.Button(
-            light_buttons,
-            text="Weiß",
-            command=lambda: self._send_light(255, 255, 255),
-        ).grid(row=1, column=0, padx=4, pady=4)
-        ttk.Button(
-            light_buttons,
-            text="Aus",
-            command=lambda: self._send_light(0, 0, 0),
-        ).grid(row=1, column=1, padx=4, pady=4)
+        self.light_buttons = []
+        self.light_buttons.append(
+            ttk.Button(
+                light_buttons,
+                text="Rot",
+                command=lambda: self._send_light(255, 0, 0),
+            )
+        )
+        self.light_buttons[-1].grid(row=0, column=0, padx=4, pady=4)
+        self.light_buttons.append(
+            ttk.Button(
+                light_buttons,
+                text="Grün",
+                command=lambda: self._send_light(0, 255, 0),
+            )
+        )
+        self.light_buttons[-1].grid(row=0, column=1, padx=4, pady=4)
+        self.light_buttons.append(
+            ttk.Button(
+                light_buttons,
+                text="Blau",
+                command=lambda: self._send_light(0, 0, 255),
+            )
+        )
+        self.light_buttons[-1].grid(row=0, column=2, padx=4, pady=4)
+        self.light_buttons.append(
+            ttk.Button(
+                light_buttons,
+                text="Weiß",
+                command=lambda: self._send_light(255, 255, 255),
+            )
+        )
+        self.light_buttons[-1].grid(row=1, column=0, padx=4, pady=4)
+        self.light_buttons.append(
+            ttk.Button(
+                light_buttons,
+                text="Aus",
+                command=lambda: self._send_light(0, 0, 0),
+            )
+        )
+        self.light_buttons[-1].grid(row=1, column=1, padx=4, pady=4)
 
         bright_frame = ttk.Frame(control_card, style="Card.TFrame")
         bright_frame.pack(fill="x", padx=16, pady=(0, 16))
@@ -289,16 +380,23 @@ class EntiRobotiRemote(tk.Tk):
         )
         bright_buttons = ttk.Frame(bright_frame, style="Card.TFrame")
         bright_buttons.pack(padx=8, pady=(0, 8))
-        ttk.Button(
-            bright_buttons,
-            text="Hell +",
-            command=lambda: self._send_brightness(1),
-        ).grid(row=0, column=0, padx=4, pady=4)
-        ttk.Button(
-            bright_buttons,
-            text="Hell -",
-            command=lambda: self._send_brightness(2),
-        ).grid(row=0, column=1, padx=4, pady=4)
+        self.brightness_buttons = []
+        self.brightness_buttons.append(
+            ttk.Button(
+                bright_buttons,
+                text="Hell +",
+                command=lambda: self._send_brightness(1),
+            )
+        )
+        self.brightness_buttons[-1].grid(row=0, column=0, padx=4, pady=4)
+        self.brightness_buttons.append(
+            ttk.Button(
+                bright_buttons,
+                text="Hell -",
+                command=lambda: self._send_brightness(2),
+            )
+        )
+        self.brightness_buttons[-1].grid(row=0, column=1, padx=4, pady=4)
 
         help_frame = ttk.Frame(control_card, style="Card.TFrame")
         help_frame.pack(fill="x", padx=16, pady=(0, 16))
@@ -307,6 +405,8 @@ class EntiRobotiRemote(tk.Tk):
             text="Hotkeys: W/A/S/D, Q/E/Z/C, X (Stop)",
             style="Sub.TLabel",
         ).pack(anchor="w", padx=8, pady=8)
+
+        self._set_controls_state(enabled=False)
 
     def _bind_keys(self):
         self.bind("<w>", lambda _e: self._send("forward"))
@@ -323,36 +423,86 @@ class EntiRobotiRemote(tk.Tk):
         try:
             self.controller.connect()
             self.status.set("Verbunden")
+            self.connection_error.set("")
+            self.is_connected = True
+            self._set_controls_state(enabled=True)
             self._start_camera()
         except (OSError, socket.timeout):
-            self.status.set("Verbindung fehlgeschlagen")
+            self.status.set("Nicht verbunden")
+            self.connection_error.set("Verbindung fehlgeschlagen")
+            self.is_connected = False
+            self._set_controls_state(enabled=False)
 
     def _disconnect(self):
         self.controller.disconnect()
         self.status.set("Getrennt")
+        self.connection_error.set("")
+        self.is_connected = False
+        self._set_controls_state(enabled=False)
         self._stop_camera()
 
     def _send(self, action):
+        if not self.is_connected:
+            return
         direction = COMMAND_MAP[action]
-        self.controller.send(direction, self.speed.get())
+        if not self.controller.send(direction, self.speed.get()):
+            self._handle_disconnect()
 
     def _send_mode(self, mode):
-        self.controller.send_command(101, D1=mode)
+        if not self.is_connected:
+            return
+        if not self.controller.send_command(101, D1=mode):
+            self._handle_disconnect()
 
     def _send_stop_mode(self):
-        self.controller.send_command(100)
+        if not self.is_connected:
+            return
+        if not self.controller.send_command(100):
+            self._handle_disconnect()
 
     def _send_clear_program(self):
-        self.controller.send_command(110)
+        if not self.is_connected:
+            return
+        if not self.controller.send_command(110):
+            self._handle_disconnect()
 
     def _send_servo(self):
-        self.controller.send_command(5, D1=1, D2=self.servo_angle.get())
+        if not self.is_connected:
+            return
+        if not self.controller.send_command(5, D1=1, D2=self.servo_angle.get()):
+            self._handle_disconnect()
 
     def _send_light(self, red, green, blue):
-        self.controller.send_command(8, D1=0, D2=red, D3=green, D4=blue)
+        if not self.is_connected:
+            return
+        if not self.controller.send_command(8, D1=0, D2=red, D3=green, D4=blue):
+            self._handle_disconnect()
 
     def _send_brightness(self, direction):
-        self.controller.send_command(105, D1=direction)
+        if not self.is_connected:
+            return
+        if not self.controller.send_command(105, D1=direction):
+            self._handle_disconnect()
+
+    def _set_controls_state(self, enabled):
+        state = "normal" if enabled else "disabled"
+        for button in self.motion_buttons:
+            button.configure(state=state)
+        for button in self.mode_buttons:
+            button.configure(state=state)
+        for button in self.light_buttons:
+            button.configure(state=state)
+        for button in self.brightness_buttons:
+            button.configure(state=state)
+        self.speed_slider.configure(state=state)
+        self.servo_slider.configure(state=state)
+
+    def _handle_disconnect(self):
+        self.status.set("Getrennt")
+        self.connection_error.set("Verbindung verloren")
+        self.is_connected = False
+        self._set_controls_state(enabled=False)
+        self._stop_camera()
 
     def _start_camera(self):
         if self.video_capture:
